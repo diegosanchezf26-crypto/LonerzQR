@@ -1,0 +1,124 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.lower() == 'diegosanchezf26@gmail.com';
+    }
+
+    // Dueño del QR (para get / update sobre un documento existente)
+    function isOwner() {
+      return signedIn()
+        && resource.data.get('ownerEmail', '').lower() == request.auth.token.email.lower();
+    }
+
+    function onlyChanges(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    // Visitante anónimo que escanea: solo +1 a clicks, con sello de tiempo del servidor,
+    // y como mínimo 1 segundo desde el escaneo anterior de esa tarjeta (anti-abuso del contador)
+    function isClickBump() {
+      return onlyChanges(['clicks', 'lastScanAt'])
+        && request.resource.data.clicks == resource.data.get('clicks', 0) + 1
+        && request.resource.data.lastScanAt == request.time
+        && request.time > resource.data.get('lastScanAt', timestamp.date(2000, 1, 1)) + duration.value(1, 's');
+    }
+
+    // Cliente dueño: título, URL, modo, enlaces, título de página y horario
+    function isOwnerEdit() {
+      let d = request.resource.data;
+      return isOwner()
+        && onlyChanges(['title', 'url', 'mode', 'links', 'profileTitle', 'schedule'])
+        && d.title is string
+        && d.title.size() > 0
+        && d.title.size() <= 120
+        && d.url is string
+        && d.url.size() <= 2000
+        && (d.url == '' || d.url.matches('^https?://.+'))
+        && d.get('mode', 'direct') in ['direct', 'links']
+        && d.get('links', []) is list
+        && d.get('links', []).size() <= 8
+        && d.get('profileTitle', '') is string
+        && d.get('profileTitle', '').size() <= 80
+        && d.get('schedule', {}) is map;
+    }
+
+    // Cliente dueño: activar / desactivar su tarjeta
+    function isOwnerToggle() {
+      return isOwner()
+        && onlyChanges(['active'])
+        && request.resource.data.active is bool;
+    }
+
+    // Cliente reclamando una tarjeta libre: solo ownerEmail (y opcionalmente clicks +1),
+    // y solo si estaba sin dueño y el nuevo dueño es él mismo
+    function isClaim() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && resource.data.get('ownerEmail', '') == ''
+        && request.resource.data.ownerEmail == request.auth.token.email.lower()
+        && onlyChanges(['ownerEmail', 'clicks'])
+        && (!('clicks' in request.resource.data.diff(resource.data).affectedKeys())
+            || request.resource.data.clicks == resource.data.get('clicks', 0) + 1);
+    }
+
+    match /qrs/{sn} {
+      // Lectura puntual pública: necesaria para que el QR redirija sin login
+      allow get: if true;
+
+      // Listados: admin ve todo; cliente solo los suyos (la consulta debe filtrar por ownerEmail)
+      allow list: if isAdmin()
+        || (signedIn() && resource.data.ownerEmail == request.auth.token.email);
+
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || isClickBump() || isOwnerEdit() || isOwnerToggle() || isClaim();
+    }
+
+    // Registro de cada escaneo (estadísticas). Cualquiera puede crear, pero solo con datos
+    // válidos y con el dueño real de la tarjeta. Lectura: admin todo, cliente solo lo suyo.
+    match /scans/{id} {
+      allow create: if request.resource.data.keys().hasOnly(['sn', 'ownerEmail', 'ts', 'country', 'device'])
+        && request.resource.data.sn is string
+        && request.resource.data.sn.size() <= 64
+        && request.resource.data.ts == request.time
+        && request.resource.data.country is string
+        && request.resource.data.country.size() <= 3
+        && request.resource.data.device in ['android', 'ios', 'windows', 'mac', 'linux', 'other']
+        && request.resource.data.ownerEmail is string
+        && request.resource.data.ownerEmail == get(/databases/$(database)/documents/qrs/$(request.resource.data.sn)).data.get('ownerEmail', '');
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.ownerEmail == request.auth.token.email.lower());
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // Historial de cambios: lo escribe quien edita, solo lo lee el admin
+    match /auditLogs/{id} {
+      allow read: if isAdmin();
+      allow create: if signedIn()
+        && request.auth.token.email_verified == true
+        && request.resource.data.keys().hasOnly(['sn', 'by', 'at', 'action', 'changes'])
+        && request.resource.data.sn is string
+        && request.resource.data.by == request.auth.token.email.lower()
+        && request.resource.data.at == request.time
+        && request.resource.data.action in ['edit', 'toggle', 'claim', 'create']
+        && request.resource.data.changes is map
+        && request.resource.data.changes.size() <= 12
+        && (isAdmin()
+            || getAfter(/databases/$(database)/documents/qrs/$(request.resource.data.sn)).data.get('ownerEmail', '').lower() == request.auth.token.email.lower());
+      allow update, delete: if false;
+    }
+
+    // Datos de venta (cliente, fecha, precio): privados, solo admin
+    match /sales/{sn} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>QRLonberz - Procesando...</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b293b;color:#f8fafc;font-family:system-ui,-apple-system,sans-serif}
+  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;box-sizing:border-box}
+  .spin{width:42px;height:42px;border:4px solid #38bdf8;border-top-color:transparent;border-radius:50%;animation:s .8s linear infinite}
+  @keyframes s{to{transform:rotate(360deg)}}
+  p{color:#cbd5e1;font-size:14px;margin:14px 0 0;max-width:340px;line-height:1.5}
+  h1{font-size:21px;margin:0 0 6px;color:#fff}
+  button, a.btn{display:inline-block;margin-top:20px;background:#0284c7;color:#fff;border:none;cursor:pointer;text-decoration:none;padding:13px 24px;border-radius:12px;font-size:14px;font-weight:700;box-shadow:0 4px 14px rgba(2,132,199,0.45)}
+  .icon{font-size:44px;margin-bottom:12px}
+  [hidden]{display:none!important}
+</style>
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
+<script>
+  // ===== RUTA RÁPIDA: sin SDK de Firebase ni login. Un fetch REST y redirige. =====
+  var PID = 'qrlonberzdb', KEY = 'AIzaSyB84E9y8vwR3lNLZWeA7e_xawIvttr1tZU';
+  var ROOT = 'projects/' + PID + '/databases/(default)/documents';
+  var BASE = 'https://firestore.googleapis.com/v1/' + ROOT;
+
+  function dv(v) {
+    if (!v) return null;
+    if ('stringValue' in v) return v.stringValue;
+    if ('integerValue' in v) return Number(v.integerValue);
+    if ('doubleValue' in v) return v.doubleValue;
+    if ('booleanValue' in v) return v.booleanValue;
+    if ('timestampValue' in v) return v.timestampValue;
+    if ('mapValue' in v) { var o = {}, f = v.mapValue.fields || {}; for (var k in f) o[k] = dv(f[k]); return o; }
+    if ('arrayValue' in v) return (v.arrayValue.values || []).map(dv);
+    return null;
+  }
+  function decodeDoc(doc) { var o = {}, f = (doc && doc.fields) || {}; for (var k in f) o[k] = dv(f[k]); return o; }
+  function safeHttp(u) {
+    try { var x = new URL(String(u || '').trim()); return (x.protocol === 'http:' || x.protocol === 'https:') ? x.href : ''; }
+    catch (e) { return ''; }
+  }
+  function safeLink(u) {
+    try { var x = new URL(String(u || '').trim()); return ['http:', 'https:', 'tel:', 'mailto:'].indexOf(x.protocol) >= 0 ? x.href : ''; }
+    catch (e) { return ''; }
+  }
+  function toMin(t) { var m = /^(\d{1,2}):(\d{2})$/.exec(String(t || '')); return m ? Number(m[1]) * 60 + Number(m[2]) : null; }
+  function inHours(s, now) {
+    try {
+      var tz = s.tz || 'America/Lima';
+      var parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(now);
+      var get = function (t) { var p = parts.filter(function (x) { return x.type === t; })[0]; return p && p.value; };
+      var dayIdx = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[get('weekday')];
+      var cur = (Number(get('hour')) % 24) * 60 + Number(get('minute'));
+      var days = Array.isArray(s.days) && s.days.length ? s.days.map(Number) : [0, 1, 2, 3, 4, 5, 6];
+      if (days.indexOf(dayIdx) < 0) return false;
+      var st = toMin(s.start), en = toMin(s.end);
+      if (st === null || en === null) return true;
+      return st <= en ? (cur >= st && cur < en) : (cur >= st || cur < en);
+    } catch (e) { return true; }
+  }
+  function resolveCard(d, now) {
+    if (!d || d.active === false) return { kind: 'slow' };
+    var s = d.schedule;
+    if (s && s.enabled && !inHours(s, now)) {
+      var alt = safeHttp(s.altUrl);
+      if (alt) return { kind: 'redirect', url: alt };
+    }
+    var links = (Array.isArray(d.links) ? d.links : []).filter(function (l) { return l && safeLink(l.url) && String(l.label || '').trim(); });
+    if (d.mode === 'links' && links.length) return { kind: 'links' };
+    var main = safeHttp(d.url);
+    if (main) return { kind: 'redirect', url: main };
+    return { kind: 'slow' };
+  }
+  function deviceOf() {
+    var ua = navigator.userAgent || '';
+    if (/android/i.test(ua)) return 'android';
+    if (/iphone|ipad|ipod/i.test(ua)) return 'ios';
+    if (/windows/i.test(ua)) return 'windows';
+    if (/macintosh|mac os/i.test(ua)) return 'mac';
+    if (/linux/i.test(ua)) return 'linux';
+    return 'other';
+  }
+  function recordFast(sn, d) {
+    try {
+      var id = (window.crypto && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2)).replace(/-/g, '');
+      fetch(BASE + ':commit?key=' + KEY, {
+        method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ writes: [
+          { transform: { document: ROOT + '/qrs/' + sn, fieldTransforms: [
+            { fieldPath: 'clicks', increment: { integerValue: '1' } },
+            { fieldPath: 'lastScanAt', setToServerValue: 'REQUEST_TIME' } ] } },
+          { update: { name: ROOT + '/scans/' + id, fields: {
+              sn: { stringValue: sn }, ownerEmail: { stringValue: String(d.ownerEmail || '') },
+              country: { stringValue: '??' }, device: { stringValue: deviceOf() } } },
+            updateTransforms: [{ fieldPath: 'ts', setToServerValue: 'REQUEST_TIME' }],
+            currentDocument: { exists: false } }
+        ] })
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
+  (function () {
+    var sn = (new URLSearchParams(location.search).get('sn') || '').trim().toUpperCase();
+    window.__fastFailed = true;
+    window.__fastPromise = Promise.resolve();
+    if (!/^[A-Z0-9_-]{1,64}$/.test(sn)) return;
+
+    window.__fastPromise = fetch(BASE + '/qrs/' + encodeURIComponent(sn) + '?key=' + KEY, { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (doc) {
+        if (!doc || !doc.fields) return;
+        var d = decodeDoc(doc);
+        var res = resolveCard(d, new Date());
+        if (res.kind === 'slow') return; // casos especiales -> ruta lenta (avisos, reclamar, etc.)
+        recordFast(sn, d);
+        window.__fastFailed = false;
+        if (res.kind === 'links') location.replace(new URL('p.html?sn=' + encodeURIComponent(sn), location.href).href);
+        else location.replace(res.url);
+      })
+      .catch(function () {});
+  })();
+
+  function loadScript(src) {
+    return new Promise(function (res, rej) {
+      var s = document.createElement('script');
+      s.src = src; s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+</script>
+</head>
+<body>
+  <div class="wrap" id="loading">
+    <div class="spin"></div>
+    <p>Verificando tarjeta...</p>
+  </div>
+
+  <div class="wrap" id="notice" hidden>
+    <div class="icon" id="notice-icon">🔗</div>
+    <h1 id="notice-title"></h1>
+    <p id="notice-text"></p>
+    <button id="notice-btn" hidden>Continuar con Google</button>
+    <a id="notice-link" class="btn" href="index.html" hidden>Ir a mi Panel</a>
+  </div>
+
+<script>
+ // Correo del administrador: ponlo aquí (el admin no reclama tarjetas al escanearlas).
+ // Si lo dejas con el marcador, el admin podría reclamar una tarjeta libre al escanearla.
+ var ADMIN_EMAIL = "PON_AQUI_EL_CORREO_ADMIN";
+
+ // Ruta lenta (SDK completo): solo si la rápida no pudo redirigir
+ window.__fastPromise.then(function () {
+  if (!window.__fastFailed) return; // ya se está redirigiendo
+  var V = 'https://www.gstatic.com/firebasejs/10.8.0/';
+  return loadScript(V + 'firebase-app-compat.js')
+    .then(function () { return Promise.all([loadScript(V + 'firebase-auth-compat.js'), loadScript(V + 'firebase-firestore-compat.js')]); })
+    .then(bootSlow);
+ });
+
+ function bootSlow() {
+  const firebaseConfig = {
+    apiKey: "AIzaSyB84E9y8vwR3lNLZWeA7e_xawIvttr1tZU",
+    authDomain: "qrlonberzdb.firebaseapp.com",
+    projectId: "qrlonberzdb",
+    storageBucket: "qrlonberzdb.firebasestorage.app",
+    messagingSenderId: "50879837559",
+    appId: "1:50879837559:web:7dc4b4dc9f404e367f1d72"
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+  const auth = firebase.auth();
+  const FV = firebase.firestore.FieldValue;
+
+  let alreadyProcessed = false;
+  let inFlight = false;
+
+  function safeUrl(u) { return safeHttp(u); }
+
+  // +1 escaneo y registro del escaneo (mismo formato que la ruta rápida)
+  function slowRecord(ref, sn, data) {
+    const b = db.batch();
+    b.update(ref, { clicks: FV.increment(1), lastScanAt: FV.serverTimestamp() });
+    b.set(db.collection('scans').doc(), {
+      sn, ownerEmail: data.ownerEmail || '', ts: FV.serverTimestamp(), country: '??', device: deviceOf()
+    });
+    return b.commit().catch(() => {});
+  }
+
+  function showNotice(icon, title, text, mode) {
+    document.getElementById('loading').hidden = true;
+    document.getElementById('notice').hidden = false;
+    document.getElementById('notice-icon').textContent = icon;
+    document.getElementById('notice-title').textContent = title;
+    document.getElementById('notice-text').textContent = text;
+
+    const btn = document.getElementById('notice-btn');
+    const link = document.getElementById('notice-link');
+    btn.hidden = true;
+    link.hidden = true;
+
+    if (mode === 'login') {
+      btn.hidden = false;
+      btn.textContent = 'Vincular con mi Google';
+      btn.onclick = () => {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        auth.signInWithPopup(provider).catch((err) => {
+          if (err.code === 'auth/popup-blocked' || err.code === 'auth/cancelled-popup-request') {
+            auth.signInWithRedirect(provider);
+          } else {
+            alert("Error al iniciar sesión: " + err.message);
+          }
+        });
+      };
+    } else if (mode === 'panel') {
+      link.hidden = false;
+    }
+  }
+
+  async function processQR(user) {
+    if (alreadyProcessed || inFlight) return;
+    inFlight = true;
+
+    const params = new URLSearchParams(location.search);
+    const rawSn = params.get('sn');
+    const sn = rawSn ? rawSn.trim().toUpperCase() : '';
+
+    if (!sn) {
+      alreadyProcessed = true;
+      return showNotice('⚠️', 'Código no válido', 'Este enlace no contiene un número de serie QR.', 'none');
+    }
+
+    try {
+      const ref = db.collection('qrs').doc(sn);
+      // Siempre leer del servidor (nunca de caché) para reflejar la URL más reciente
+      const doc = await ref.get({ source: 'server' });
+
+      if (!doc.exists) {
+        alreadyProcessed = true;
+        return showNotice('🔍', 'Código no encontrado', `La tarjeta ${sn} no está registrada en QRLonberz.`, 'none');
+      }
+
+      const data = doc.data();
+      const owner = (data.ownerEmail || "").trim().toLowerCase();
+
+      // 0. SI YA TIENE URL CONFIGURADA (ej. la puso el admin), redirigir aunque no tenga dueño
+      const presetUrl = safeUrl(data.url || '');
+      if (!owner && presetUrl && data.active !== false) {
+        alreadyProcessed = true;
+        const rec0 = slowRecord(ref, sn, data);
+        await Promise.race([rec0, new Promise(r => setTimeout(r, 600))]);
+        location.replace(presetUrl);
+        return;
+      }
+
+      // 1. SI LA TARJETA ESTÁ LIBRE (SIN DUEÑO):
+      if (!owner) {
+        if (!user) {
+          // Esperamos a que inicie sesión para reclamarla (no marcamos alreadyProcessed aún)
+          inFlight = false;
+          return showNotice(
+            '✨',
+            '¡Tarjeta Nueva Disponible!',
+            `El código ${sn} aún no tiene propietario. Inicia sesión con Google para vincularlo automáticamente a tu cuenta.`,
+            'login'
+          );
+        }
+
+        // El admin no reclama tarjetas escaneándolas: las asigna desde el panel
+        if (user.email.toLowerCase() === String(ADMIN_EMAIL).toLowerCase()) {
+          alreadyProcessed = true;
+          return showNotice('🛠️', 'Tarjeta libre', `El código ${sn} no tiene dueño ni URL. Asígnalo desde el panel.`, 'panel');
+        }
+
+        // Usuario autenticado reclamando por primera vez
+        alreadyProcessed = true;
+        const userEmail = user.email.toLowerCase();
+        const batch = db.batch();
+        batch.update(ref, { ownerEmail: userEmail, clicks: FV.increment(1) });
+        batch.set(db.collection('auditLogs').doc(), {
+          sn, by: userEmail, at: FV.serverTimestamp(), action: 'claim',
+          changes: { ownerEmail: { from: '', to: userEmail } }
+        });
+        await batch.commit();
+
+        // Lo mandamos directo a su panel para que configure su enlace
+        location.replace(`index.html?claimed=${encodeURIComponent(sn)}`);
+        return;
+      }
+
+      // 2. SI LA TARJETA YA TIENE DUEÑO:
+      alreadyProcessed = true;
+
+      if (data.active === false) {
+        return showNotice('⏸️', 'Código Desactivado', 'Esta tarjeta se encuentra temporalmente deshabilitada por su propietario.', 'none');
+      }
+
+      const dest = safeUrl(data.url || '');
+      if (!dest) {
+        return showNotice('⚙️', 'Tarjeta sin configurar', 'El propietario aún no ha configurado la página de destino de este código.', 'panel');
+      }
+
+      // Sumar +1 clic y redirigir
+      const rec = slowRecord(ref, sn, data);
+      await Promise.race([rec, new Promise(r => setTimeout(r, 600))]);
+      location.replace(dest);
+
+    } catch (err) {
+      console.error("Error procesando QR:", err);
+      alreadyProcessed = true;
+      inFlight = false;
+      showNotice('❌', 'Error al procesar', `Detalle: ${err.message}`, 'none');
+    }
+  }
+
+  // Manejar retorno de signInWithRedirect en celulares
+  auth.getRedirectResult().catch((err) => {
+    console.error("Redirect error:", err);
+  });
+
+  auth.onAuthStateChanged((user) => {
+    processQR(user);
+  });
+ }
+</script>
+</body>
+</html>

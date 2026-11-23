@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QRLonberz - Control Center</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      background: radial-gradient(circle at 12% 18%, #154c66 0%, #0b293b 42%, #071926 100%);
+      background-attachment: fixed;
+      color: #0f172a;
+      min-height: 100vh;
+    }
+    .glass-dark {
+      background: rgba(11, 37, 53, 0.62);
+      backdrop-filter: blur(22px);
+      -webkit-backdrop-filter: blur(22px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+    }
+    .glass-canvas {
+      background: linear-gradient(155deg, rgba(215, 232, 240, 0.78) 0%, rgba(169, 206, 222, 0.68) 55%, rgba(122, 182, 204, 0.62) 100%);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border: 1px solid rgba(255, 255, 255, 0.42);
+      box-shadow: 0 24px 60px rgba(4, 18, 28, 0.35);
+    }
+    .qr-card-item {
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.95);
+      box-shadow: 0 10px 25px rgba(15, 39, 56, 0.08);
+      border-radius: 20px;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .qr-card-item:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 14px 30px rgba(15, 39, 56, 0.12);
+    }
+  </style>
+</head>
+<body class="p-3 md:p-5 flex flex-col">
+
+  <!-- PANTALLA DE LOGIN -->
+  <section id="login-view" class="flex-1 flex items-center justify-center p-4">
+    <div class="glass-dark rounded-3xl p-8 md:p-10 max-w-md w-full text-center space-y-6 text-white">
+      <div class="w-16 h-16 rounded-2xl bg-sky-400/20 border border-sky-300/30 flex items-center justify-center mx-auto text-sky-300 text-2xl">
+        <i class="fa-solid fa-infinity"></i>
+      </div>
+      <div class="space-y-2">
+        <h1 class="text-2xl font-extrabold tracking-tight">QRLonberz Control</h1>
+        <p class="text-sm text-slate-300">Inicia sesión para gestionar tus tarjetas NFC y QR.</p>
+      </div>
+      <button onclick="loginWithGoogle()" class="w-full bg-white hover:bg-slate-100 text-slate-900 font-bold py-3.5 px-5 rounded-xl text-sm transition shadow-lg flex items-center justify-center gap-3">
+        <i class="fa-brands fa-google text-red-500 text-base"></i> Continuar con Google
+      </button>
+    </div>
+  </section>
+
+  <!-- DASHBOARD PRINCIPAL -->
+  <div id="app-dashboard" class="hidden flex-1 flex flex-col lg:flex-row gap-4 max-w-[1600px] w-full mx-auto">
+    <aside class="glass-dark rounded-[26px] w-full lg:w-64 p-4 flex flex-col justify-between text-slate-300">
+      <div class="space-y-6">
+        <div class="flex items-center gap-3 px-2 pt-1">
+          <div class="w-10 h-10 rounded-full bg-white/15 border border-white/25 flex items-center justify-center text-white text-lg">
+            <i class="fa-solid fa-infinity"></i>
+          </div>
+          <div>
+            <h2 class="font-bold text-white text-sm leading-tight">QRLonberz</h2>
+            <p id="user-role-badge" class="text-[11px] text-sky-200/70">Control Center</p>
+          </div>
+        </div>
+
+        <nav class="space-y-1">
+          <button class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-white bg-white/15 border border-white/20">
+            <i class="fa-solid fa-grid-2 w-4 text-center"></i> Cuadrícula de QR
+          </button>
+          <button onclick="openScannerModal()" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-300 hover:bg-white/10 transition">
+            <i class="fa-solid fa-camera w-4 text-center text-emerald-300"></i> Escanear con Cámara
+          </button>
+          <button onclick="openClaimModal()" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-300 hover:bg-white/10 transition">
+            <i class="fa-solid fa-link w-4 text-center text-sky-300"></i> Vincular por Nº Serie
+          </button>
+          <button onclick="openCreateModal()" class="admin-only w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-300 hover:bg-white/10 transition">
+            <i class="fa-solid fa-plus-circle w-4 text-center text-indigo-300"></i> Crear Nuevo QR
+          </button>
+          <button onclick="openBulkModal()" class="admin-only w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-300 hover:bg-white/10 transition">
+            <i class="fa-solid fa-layer-group w-4 text-center text-amber-300"></i> Crear QR en Lote
+          </button>
+        </nav>
+      </div>
+      <div class="pt-4">
+        <button onclick="logout()" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-rose-300 hover:bg-rose-500/15 transition">
+          <i class="fa-solid fa-right-from-bracket w-4 text-center"></i> Cerrar Sesión
+        </button>
+      </div>
+    </aside>
+
+    <div class="flex-1 flex flex-col gap-4 min-w-0">
+      <header class="glass-dark rounded-[22px] px-4 py-2.5 flex items-center justify-between gap-4">
+        <div class="relative flex-1 max-w-md">
+          <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-sky-200/60 text-xs"></i>
+          <input type="text" id="global-search" oninput="renderLimit=60;renderCards()" placeholder="Buscar por título, serie o correo..." class="w-full bg-white/15 border border-white/10 rounded-full pl-9 pr-4 py-2 text-xs text-white placeholder-sky-200/60 focus:outline-none">
+        </div>
+        <div class="flex items-center gap-2.5">
+          <div id="user-avatar" class="w-9 h-9 rounded-full bg-sky-200 text-slate-900 font-extrabold text-xs flex items-center justify-center shadow">U</div>
+          <div class="text-left leading-tight hidden sm:block">
+            <p id="user-display" class="text-xs font-bold text-white">Usuario</p>
+            <p id="user-email-label" class="text-[10px] text-sky-200/75">Cargando...</p>
+          </div>
+        </div>
+      </header>
+
+      <main class="glass-canvas rounded-[28px] p-5 md:p-7 flex-1 flex flex-col gap-6">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 class="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight">Tarjetas QR & NFC</h1>
+            <p class="text-xs md:text-sm text-slate-700/80 mt-0.5">Gestión dinámica en tiempo real.</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button onclick="openScannerModal()" class="bg-emerald-600 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow hover:bg-emerald-700 transition flex items-center gap-2">
+              <i class="fa-solid fa-camera"></i> Escanear
+            </button>
+            <button onclick="openClaimModal()" class="bg-sky-600 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow hover:bg-sky-700 transition">
+              Vincular
+            </button>
+            <button onclick="openCreateModal()" class="admin-only bg-slate-900 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow hover:bg-slate-800 transition">
+              + Nuevo QR
+            </button>
+            <button onclick="openBulkModal()" class="admin-only bg-amber-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow hover:bg-amber-600 transition">
+              <i class="fa-solid fa-layer-group"></i> Lote
+            </button>
+          </div>
+        </div>
+
+        <div id="cards-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5"></div>
+      </main>
+    </div>
+  </div>
+
+  <!-- MODAL ESCÁNER DE CÁMARA -->
+  <div id="scanner-modal" class="fixed inset-0 bg-slate-950/75 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 text-center">
+      <div class="flex items-center justify-between">
+        <h3 class="text-base font-bold text-slate-900">Escanear QR con Cámara</h3>
+        <button onclick="closeScannerModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <div id="reader" class="w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 min-h-[250px]"></div>
+      <p class="text-xs text-slate-500">Apunta la cámara trasera al código QR.</p>
+      <button onclick="closeScannerModal()" class="w-full bg-slate-900 text-white text-xs font-bold py-2.5 rounded-xl">Cancelar</button>
+    </div>
+  </div>
+
+  <!-- MODAL FICHA TÉCNICA COMPLETA (SOLO ADMIN AL ESCANEAR) -->
+  <div id="admin-scan-modal" class="fixed inset-0 bg-slate-950/75 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b pb-3">
+        <div class="flex items-center gap-2">
+          <span class="bg-indigo-100 text-indigo-700 p-2 rounded-xl text-xs"><i class="fa-solid fa-shield-halved"></i></span>
+          <h3 class="text-base font-extrabold text-slate-900">Auditoría de Código QR</h3>
+        </div>
+        <button onclick="closeAdminScanModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <div id="admin-scan-details" class="space-y-2.5 text-xs bg-slate-50 p-4 rounded-2xl border border-slate-100"></div>
+      <div class="flex gap-2 pt-1">
+        <button id="admin-scan-edit-btn" class="flex-1 bg-slate-900 text-white font-bold text-xs py-2.5 rounded-xl">Editar / Asignar</button>
+        <a id="admin-scan-visit-btn" href="#" target="_blank" class="flex-1 bg-sky-600 text-white font-bold text-xs py-2.5 rounded-xl text-center">Abrir Destino</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL VISUALIZAR QR (EL OJITO) -->
+  <div id="preview-modal" class="fixed inset-0 bg-slate-950/60 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl text-center space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 id="preview-title" class="text-base font-bold text-slate-900 truncate">Vista Previa QR</h3>
+        <button onclick="closePreviewModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <div id="preview-qrcode" class="bg-white p-4 rounded-2xl border border-slate-200 inline-flex items-center justify-center shadow-inner mx-auto"></div>
+      <div>
+        <span id="preview-sn" class="font-mono text-xs text-indigo-600 font-bold bg-indigo-50 px-3 py-1 rounded-full"></span>
+        <p id="preview-owner" class="text-xs text-slate-500 mt-2 truncate"></p>
+      </div>
+      <button onclick="closePreviewModal()" class="w-full bg-slate-900 text-white text-xs font-bold py-2.5 rounded-xl">Cerrar</button>
+    </div>
+  </div>
+
+  <!-- MODAL EDICIÓN (CON ASIGNACIÓN DE CORREO PARA ADMIN) -->
+  <div id="edit-modal" class="fixed inset-0 bg-slate-950/60 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+      <h3 class="text-lg font-bold text-slate-900">Configurar Tarjeta QR</h3>
+      <input type="hidden" id="edit-sn">
+      <div>
+        <label class="block text-xs font-bold text-slate-600 mb-1">Título de la Tarjeta</label>
+        <input type="text" id="edit-title" class="w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-600 mb-1">URL Destino (https://...)</label>
+        <input type="url" id="edit-url" placeholder="https://..." class="w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs">
+      </div>
+      <div class="admin-only">
+        <label class="block text-xs font-bold text-indigo-700 mb-1">Correo del Propietario (Admin: dejar vacío para liberar)</label>
+        <input type="email" id="edit-owner" placeholder="cliente@gmail.com" class="w-full bg-indigo-50/50 border border-indigo-200 rounded-xl px-3 py-2.5 text-xs">
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="closeEditModal()" class="bg-slate-100 text-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl">Cancelar</button>
+        <button onclick="saveEditQR()" class="bg-sky-600 text-white text-xs font-bold px-4 py-2.5 rounded-xl">Guardar Cambios</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL VINCULAR TARJETA POR Nº SERIE -->
+  <div id="claim-modal" class="fixed inset-0 bg-slate-950/60 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+      <h3 class="text-lg font-bold text-slate-900">Vincular Nueva Tarjeta NFC</h3>
+      <p class="text-xs text-slate-600">Ingresa el número de serie (ej. SN-1234) impreso en tu tarjeta para asociarla a tu cuenta.</p>
+      <div>
+        <label class="block text-xs font-bold text-slate-600 mb-1">Número de Serie (SN)</label>
+        <input type="text" id="claim-sn" placeholder="SN-..." class="w-full bg-slate-50 border rounded-xl px-3.5 py-2.5 text-xs font-mono uppercase">
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="closeClaimModal()" class="bg-slate-100 text-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl">Cancelar</button>
+        <button onclick="submitClaim()" class="bg-sky-600 text-white text-xs font-bold px-4 py-2.5 rounded-xl">Vincular Ahora</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL CREAR (ADMIN) -->
+  <div id="create-modal" class="fixed inset-0 bg-slate-950/60 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+      <h3 class="text-lg font-bold text-slate-900">Crear Nuevo Código QR</h3>
+      <div>
+        <label class="block text-xs font-bold text-slate-600 mb-1">Título</label>
+        <input type="text" id="create-title" placeholder="Ej. Tarjeta NFC Cliente" class="w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-600 mb-1">Email Propietario (Opcional - vacío = libre)</label>
+        <input type="email" id="create-owner" placeholder="cliente@gmail.com" class="w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-600 mb-1">URL Destino Inicial (Opcional)</label>
+        <input type="url" id="create-url" placeholder="https://..." class="w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs">
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="closeCreateModal()" class="bg-slate-100 text-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl">Cancelar</button>
+        <button onclick="createSingleQR()" class="bg-slate-900 text-white text-xs font-bold px-4 py-2.5 rounded-xl">Crear Código</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL CREAR EN LOTE (ADMIN) -->
+  <div id="bulk-modal" class="fixed inset-0 bg-slate-950/60 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+      <h3 class="text-lg font-bold text-slate-900">Crear QR en Lote</h3>
+      <p class="text-xs text-slate-600">Genera tarjetas libres (sin dueño) listas para vender. Al terminar se descarga un CSV con serie y enlace de cada una.</p>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-bold text-slate-600 mb-1">Cantidad (máx. 2000)</label>
+          <input type="number" id="bulk-qty" value="1000" min="1" max="2000" class="w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-600 mb-1">Título base</label>
+          <input type="text" id="bulk-title" value="Tarjeta NFC" class="w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs">
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-600 mb-1">URL inicial (opcional)</label>
+        <input type="url" id="bulk-url" placeholder="https://..." class="w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs">
+      </div>
+      <div id="bulk-progress" class="hidden">
+        <div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden"><div id="bulk-bar" class="h-2 bg-amber-500 transition-all" style="width:0%"></div></div>
+        <p id="bulk-status" class="text-[11px] text-slate-500 mt-1"></p>
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button id="bulk-cancel" onclick="closeBulkModal()" class="bg-slate-100 text-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl">Cancelar</button>
+        <button id="bulk-go" onclick="bulkCreateQR()" class="bg-amber-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl">Generar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="fixed bottom-5 right-5 bg-slate-900 text-white text-xs font-semibold px-4 py-3 rounded-2xl shadow-2xl transform translate-y-20 opacity-0 transition-all z-50">
+    <span id="toast-msg">Operación completada</span>
+  </div>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyB84E9y8vwR3lNLZWeA7e_xawIvttr1tZU",
+      authDomain: "qrlonberzdb.firebaseapp.com",
+      projectId: "qrlonberzdb",
+      storageBucket: "qrlonberzdb.firebasestorage.app",
+      messagingSenderId: "50879837559",
+      appId: "1:50879837559:web:7dc4b4dc9f404e367f1d72"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
+    const ADMIN_EMAIL = "diegosanchezf26@gmail.com";
+    // IMPORTANTE: pon aquí tu dominio fijo de producción (sin "/" final), ej. "https://qr.tudominio.com".
+    // Si queda vacío usa el dominio actual, y los QR impresos desde otro dominio/localhost quedarían apuntando mal.
+    const PUBLIC_BASE_URL = "";
+    const BASE_REDIRECT_URL = (PUBLIC_BASE_URL || (location.origin + location.pathname.replace(/[^\/]*$/, '').replace(/\/$/, ''))) + "/r.html?sn=";
+
+    function esc(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    let qrDatabase = [];
+    let currentUserRole = "guest";
+    let loggedUserEmail = "";
+    let unsubscribeDb = null;
+    let html5QrCode = null;
+    let renderLimit = 60; // con miles de QR solo se dibujan por tandas
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      document.getElementById('toast-msg').innerText = msg;
+      toast.classList.remove('translate-y-20', 'opacity-0');
+      setTimeout(() => toast.classList.add('translate-y-20', 'opacity-0'), 3500);
+    }
+
+    function formatToday() {
+      const d = new Date();
+      return d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+
+    auth.onAuthStateChanged((user) => {
+      if (user) {
+        loggedUserEmail = user.email.toLowerCase();
+        currentUserRole = (loggedUserEmail === ADMIN_EMAIL.toLowerCase()) ? "admin" : "client";
+        document.getElementById('user-display').innerText = user.displayName || user.email.split('@')[0];
+        document.getElementById('user-email-label').innerText = loggedUserEmail;
+        document.getElementById('user-avatar').innerText = (user.displayName || user.email).substring(0, 2).toUpperCase();
+        document.getElementById('user-role-badge').innerText = currentUserRole === 'admin' ? 'Admin Maestro' : 'Cliente';
+
+        document.getElementById('login-view').classList.add('hidden');
+        document.getElementById('app-dashboard').classList.remove('hidden');
+
+        applyPermissions();
+        initDatabase();
+
+        // Revisar si viene de un escaneo con parámetro ?claimed=SN-XXXX
+        const urlParams = new URLSearchParams(window.location.search);
+        const claimedSn = urlParams.get('claimed');
+        if (claimedSn) {
+          showToast(`¡Tarjeta ${claimedSn} vinculada a tu cuenta!`);
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      } else {
+        if (unsubscribeDb) { unsubscribeDb(); unsubscribeDb = null; }
+        document.getElementById('login-view').classList.remove('hidden');
+        document.getElementById('app-dashboard').classList.add('hidden');
+      }
+    });
+
+    function loginWithGoogle() {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      auth.signInWithPopup(provider).catch(err => {
+        if (err.code === 'auth/popup-blocked') {
+          auth.signInWithRedirect(provider);
+        } else {
+          showToast(err.message);
+        }
+      });
+    }
+
+    function logout() {
+      auth.signOut().then(() => location.reload());
+    }
+
+    function applyPermissions() {
+      const adminElements = document.querySelectorAll('.admin-only');
+      adminElements.forEach(el => {
+        if (currentUserRole !== 'admin') el.style.setProperty('display', 'none', 'important');
+        else el.style.removeProperty('display');
+      });
+    }
+
+    function initDatabase() {
+      if (unsubscribeDb) unsubscribeDb();
+      const query = currentUserRole === 'admin'
+        ? db.collection("qrs")
+        : db.collection("qrs").where("ownerEmail", "==", loggedUserEmail);
+
+      unsubscribeDb = query.onSnapshot((snap) => {
+        qrDatabase = [];
+        snap.forEach(doc => {
+          let d = doc.data();
+          d.sn = d.sn || doc.id;
+          d.title = d.title || 'Tarjeta QR';
+          d.url = d.url || '';
+          d.clicks = d.clicks || 0;
+          d.ownerEmail = d.ownerEmail || '';
+          d.active = d.active !== false;
+          d.created = d.created || formatToday();
+          qrDatabase.push(d);
+        });
+        renderCards();
+      }, (err) => {
+        console.error(err);
+        showToast("Error al sincronizar datos: " + err.message);
+      });
+    }
+
+    function renderCards() {
+      const search = (document.getElementById('global-search')?.value || '').toLowerCase();
+      const grid = document.getElementById('cards-grid');
+      grid.innerHTML = '';
+
+      const filtered = qrDatabase.filter(q =>
+        q.sn.toLowerCase().includes(search) ||
+        q.title.toLowerCase().includes(search) ||
+        q.url.toLowerCase().includes(search) ||
+        q.ownerEmail.toLowerCase().includes(search)
+      );
+
+      if (filtered.length === 0) {
+        grid.innerHTML = `<div class="col-span-full p-12 text-center text-slate-700 bg-white/60 rounded-2xl font-medium">No hay tarjetas registradas aquí. Escanea un QR libre o vincúlalo con su número de serie.</div>`;
+        return;
+      }
+
+      const visible = filtered.slice(0, renderLimit);
+      visible.forEach((item, index) => {
+        const cardId = `qr-box-${index}`;
+        const card = document.createElement('div');
+        card.className = "qr-card-item p-4 flex flex-col justify-between gap-4";
+        const isActive = item.active !== false;
+
+        const ownerBadge = currentUserRole === 'admin'
+          ? `<p class="text-[11px] mt-0.5 truncate ${item.ownerEmail ? 'text-indigo-600 font-semibold' : 'text-amber-600 font-bold'}">
+               <i class="fa-solid fa-user text-[9px] mr-1"></i>${esc(item.ownerEmail) || 'SIN DUEÑO (LIBRE)'}
+             </p>`
+          : '';
+
+        card.innerHTML = `
+          <div class="flex gap-4 items-start">
+            <div class="relative group cursor-pointer" onclick="openPreviewModal('${item.sn}')">
+              <div id="${cardId}" class="w-20 h-20 bg-white p-1 rounded-xl border border-slate-200 flex-shrink-0 flex items-center justify-center"></div>
+              <div class="absolute inset-0 bg-slate-900/40 rounded-xl opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs">
+                <i class="fa-solid fa-eye"></i>
+              </div>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center justify-between gap-1.5">
+                <h3 class="font-extrabold text-slate-900 text-sm truncate">${esc(item.title)}</h3>
+                <div class="flex items-center gap-1 flex-shrink-0">
+                  <button onclick="toggleActiveStatus('${item.sn}', ${isActive})" class="px-2 py-0.5 rounded-full text-[10px] font-bold transition ${isActive ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-rose-100 text-rose-700 hover:bg-rose-200'}" title="Habilitar / Deshabilitar QR">
+                    ${isActive ? 'Activo' : 'Inactivo'}
+                  </button>
+                  <button onclick="openPreviewModal('${item.sn}')" class="text-sky-600 hover:text-sky-700 p-1 text-xs" title="Ver QR en grande">
+                    <i class="fa-solid fa-eye"></i>
+                  </button>
+                </div>
+              </div>
+              <p class="text-[11px] text-slate-500 truncate mt-0.5">Destino: ${item.url ? `<a href="${esc(item.url)}" target="_blank" rel="noopener" class="text-sky-600 hover:underline">${esc(item.url)}</a>` : '<span class="italic text-slate-400">Sin configurar</span>'}</p>
+              ${ownerBadge}
+              <div class="flex items-center justify-between mt-1.5">
+                <span class="text-[11px] text-slate-500 font-semibold">Escaneos: <strong class="text-slate-800">${item.clicks}</strong></span>
+                <span class="font-mono text-[10px] text-indigo-600 font-bold bg-indigo-50 px-2 py-0.5 rounded">${item.sn}</span>
+              </div>
+            </div>
+          </div>
+          <div class="border-t border-slate-100 pt-3 flex items-center justify-between gap-2">
+            <button onclick="openEditModal('${item.sn}')" class="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-2 rounded-xl flex items-center justify-center gap-1.5 transition shadow-sm">
+              <i class="fa-solid fa-pen text-[10px]"></i> Editar
+            </button>
+            <button onclick="downloadQR('${BASE_REDIRECT_URL}${item.sn}', '${item.sn}')" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2 rounded-xl flex items-center justify-center gap-1.5 transition">
+              <i class="fa-solid fa-download text-[10px]"></i> Descargar
+            </button>
+            <button onclick="printQR('${BASE_REDIRECT_URL}${item.sn}', '${item.sn}')" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2 rounded-xl flex items-center justify-center gap-1.5 transition">
+              <i class="fa-solid fa-print text-[10px]"></i> Imprimir
+            </button>
+          </div>
+        `;
+        grid.appendChild(card);
+
+        setTimeout(() => {
+          const el = document.getElementById(cardId);
+          if (el) {
+            el.innerHTML = '';
+            new QRCode(el, {
+              text: `${BASE_REDIRECT_URL}${item.sn}`,
+              width: 72,
+              height: 72,
+              colorDark: "#000000",
+              colorLight: "#ffffff",
+              correctLevel: QRCode.CorrectLevel.M
+            });
+          }
+        }, 30);
+      });
+
+      if (filtered.length > visible.length) {
+        const more = document.createElement('div');
+        more.className = "col-span-full text-center";
+        more.innerHTML = `<button onclick="renderLimit+=60;renderCards()" class="bg-slate-900 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow hover:bg-slate-800 transition">Mostrar más (${visible.length} de ${filtered.length})</button>`;
+        grid.appendChild(more);
+      }
+    }
+
+    function toggleActiveStatus(sn, currentStatus) {
+      const newStatus = !currentStatus;
+      db.collection("qrs").doc(sn).update({ active: newStatus }).then(() => {
+        showToast(newStatus ? "QR habilitado" : "QR deshabilitado");
+      }).catch(err => showToast("Error: " + err.message));
+    }
+
+    // EXTRAER SN DESDE URL O TEXTO ESCANEADO
+    function extractSnFromScan(rawText) {
+      const clean = rawText.trim();
+      try {
+        const u = new URL(clean);
+        const snParam = u.searchParams.get('sn');
+        if (snParam) return snParam.trim().toUpperCase();
+      } catch (e) {}
+      if (clean.toUpperCase().startsWith('SN-')) return clean.toUpperCase();
+      return null;
+    }
+
+    function openScannerModal() {
+      document.getElementById('scanner-modal').classList.remove('hidden');
+      document.getElementById('scanner-modal').classList.add('flex');
+
+      setTimeout(() => {
+        if (!html5QrCode) {
+          html5QrCode = new Html5Qrcode("reader");
+        }
+        html5QrCode.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 240, height: 240 } },
+          async (decodedText) => {
+            await closeScannerModal();
+            handleScannedResult(decodedText);
+          },
+          () => {}
+        ).catch(err => {
+          console.error(err);
+          showToast("No se pudo acceder a la cámara. Revisa los permisos.");
+        });
+      }, 250);
+    }
+
+    async function closeScannerModal() {
+      if (html5QrCode && html5QrCode.isScanning) {
+        try { await html5QrCode.stop(); } catch (e) {}
+      }
+      document.getElementById('scanner-modal').classList.add('hidden');
+      document.getElementById('scanner-modal').classList.remove('flex');
+    }
+
+    async function handleScannedResult(decodedText) {
+      const sn = extractSnFromScan(decodedText);
+      if (!sn) {
+        return showToast("El código escaneado no pertenece a QRLonberz.");
+      }
+
+      try {
+        const docRef = db.collection("qrs").doc(sn);
+        const doc = await docRef.get();
+
+        if (!doc.exists) {
+          return showToast(`El código ${sn} no existe en la base de datos.`);
+        }
+
+        const data = doc.data();
+        data.sn = sn;
+
+        // SI ES ADMINISTRADOR: MOSTRAR TODA LA INFORMACIÓN DE AUDITORÍA
+        if (currentUserRole === 'admin') {
+          showAdminScanDetails(data);
+          return;
+        }
+
+        // SI ES CLIENTE:
+        const currentOwner = (data.ownerEmail || "").trim().toLowerCase();
+
+        if (!currentOwner) {
+          // Libre -> reclamar para este cliente
+          await docRef.update({ ownerEmail: loggedUserEmail });
+          showToast(`¡Tarjeta ${sn} añadida a tu cuenta!`);
+          openEditModal(sn);
+        } else if (currentOwner === loggedUserEmail) {
+          showToast(`Esta tarjeta (${sn}) ya está en tu cuenta.`);
+          openEditModal(sn);
+        } else {
+          showToast("Acceso denegado: esta tarjeta ya pertenece a otro usuario.");
+        }
+      } catch (err) {
+        console.error(err);
+        showToast("Error al leer el QR: " + err.message);
+      }
+    }
+
+    function showAdminScanDetails(data) {
+      const details = document.getElementById('admin-scan-details');
+      const isAct = data.active !== false;
+      details.innerHTML = `
+        <div class="flex justify-between"><span class="text-slate-500">Número de Serie:</span><span class="font-mono font-bold text-indigo-600">${esc(data.sn)}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Título:</span><span class="font-bold text-slate-900">${esc(data.title) || 'Sin título'}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Propietario:</span><span class="font-bold ${data.ownerEmail ? 'text-slate-900' : 'text-amber-600'}">${esc(data.ownerEmail) || 'LIBRE (Sin dueño)'}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Estado:</span><span class="font-bold ${isAct ? 'text-emerald-600' : 'text-rose-600'}">${isAct ? 'Habilitado' : 'Deshabilitado'}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Escaneos Totales:</span><span class="font-bold text-slate-900">${data.clicks || 0}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Creado:</span><span class="text-slate-700">${data.created || 'N/A'}</span></div>
+        <div class="pt-1 border-t"><span class="text-slate-500 block mb-0.5">URL Destino:</span><span class="text-sky-600 break-all font-medium">${esc(data.url) || 'Sin URL configurada'}</span></div>
+      `;
+
+      document.getElementById('admin-scan-edit-btn').onclick = () => {
+        closeAdminScanModal();
+        openEditModal(data.sn);
+      };
+      const visitBtn = document.getElementById('admin-scan-visit-btn');
+      visitBtn.href = data.url || `${BASE_REDIRECT_URL}${data.sn}`;
+
+      document.getElementById('admin-scan-modal').classList.remove('hidden');
+      document.getElementById('admin-scan-modal').classList.add('flex');
+    }
+
+    function closeAdminScanModal() {
+      document.getElementById('admin-scan-modal').classList.add('hidden');
+      document.getElementById('admin-scan-modal').classList.remove('flex');
+    }
+
+    function openPreviewModal(sn) {
+      const item = qrDatabase.find(q => q.sn === sn);
+      if (!item) return;
+
+      document.getElementById('preview-title').innerText = item.title;
+      document.getElementById('preview-sn').innerText = item.sn;
+      document.getElementById('preview-owner').innerText = item.ownerEmail ? `Propietario: ${item.ownerEmail}` : 'Tarjeta Libre (Sin dueño)';
+
+      const container = document.getElementById('preview-qrcode');
+      container.innerHTML = '';
+      new QRCode(container, {
+        text: `${BASE_REDIRECT_URL}${item.sn}`,
+        width: 210,
+        height: 210,
+        colorDark: "#000000",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.M
+      });
+
+      document.getElementById('preview-modal').classList.remove('hidden');
+      document.getElementById('preview-modal').classList.add('flex');
+    }
+
+    function closePreviewModal() {
+      document.getElementById('preview-modal').classList.add('hidden');
+      document.getElementById('preview-modal').classList.remove('flex');
+    }
+
+    function openEditModal(sn) {
+      const item = qrDatabase.find(q => q.sn === sn);
+      if (!item) {
+        // Si acaba de ser reclamado y aún no entra al snapshot, consultamos directo
+        db.collection("qrs").doc(sn).get().then(doc => {
+          if (doc.exists) fillEditForm({ sn, ...doc.data() });
+        });
+        return;
+      }
+      fillEditForm(item);
+    }
+
+    function fillEditForm(item) {
+      document.getElementById('edit-sn').value = item.sn;
+      document.getElementById('edit-title').value = item.title || '';
+      document.getElementById('edit-url').value = item.url || '';
+      if (document.getElementById('edit-owner')) {
+        document.getElementById('edit-owner').value = item.ownerEmail || '';
+      }
+      document.getElementById('edit-modal').classList.remove('hidden');
+      document.getElementById('edit-modal').classList.add('flex');
+    }
+
+    function closeEditModal() {
+      document.getElementById('edit-modal').classList.add('hidden');
+      document.getElementById('edit-modal').classList.remove('flex');
+    }
+
+    function saveEditQR() {
+      const sn = document.getElementById('edit-sn').value;
+      const title = document.getElementById('edit-title').value.trim();
+      const url = document.getElementById('edit-url').value.trim();
+
+      if (!title) return showToast("Escribe un título para la tarjeta");
+      if (url && !/^https?:\/\/.+/i.test(url)) {
+        return showToast("La URL debe empezar con http:// o https://");
+      }
+
+      const updatePayload = { title, url };
+
+      if (currentUserRole === 'admin') {
+        const ownerVal = document.getElementById('edit-owner').value.trim().toLowerCase();
+        updatePayload.ownerEmail = ownerVal;
+      }
+
+      const ref = db.collection("qrs").doc(sn);
+      ref.update(updatePayload).then(() => ref.get({ source: 'server' })).then(doc => {
+        if ((doc.data().url || '') !== url) {
+          showToast("Aviso: el servidor no guardó la URL. Revisa las reglas de Firestore.");
+          return;
+        }
+        showToast("Tarjeta actualizada con éxito");
+        closeEditModal();
+      }).catch(err => showToast("Error al guardar: " + err.message));
+    }
+
+    function openClaimModal() {
+      document.getElementById('claim-sn').value = '';
+      document.getElementById('claim-modal').classList.remove('hidden');
+      document.getElementById('claim-modal').classList.add('flex');
+    }
+    function closeClaimModal() {
+      document.getElementById('claim-modal').classList.add('hidden');
+      document.getElementById('claim-modal').classList.remove('flex');
+    }
+
+    function submitClaim() {
+      const sn = document.getElementById('claim-sn').value.trim().toUpperCase();
+      if (!sn) return showToast("Ingresa un número de serie válido");
+
+      const docRef = db.collection("qrs").doc(sn);
+      docRef.get().then(doc => {
+        if (!doc.exists) {
+          showToast("El número de serie no existe");
+          return;
+        }
+        const data = doc.data();
+        const owner = (data.ownerEmail || "").trim().toLowerCase();
+
+        if (owner !== "" && owner !== loggedUserEmail) {
+          showToast("Este código ya pertenece a otro propietario");
+          return;
+        }
+        if (owner === loggedUserEmail) {
+          showToast("Este código ya está vinculado a tu cuenta");
+          closeClaimModal();
+          return;
+        }
+
+        docRef.update({ ownerEmail: loggedUserEmail }).then(() => {
+          showToast("¡Tarjeta vinculada con éxito a tu cuenta!");
+          closeClaimModal();
+        }).catch(err => showToast("Error de permisos: " + err.message));
+      }).catch(err => showToast("Error: " + err.message));
+    }
+
+    function openCreateModal() {
+      document.getElementById('create-title').value = '';
+      document.getElementById('create-owner').value = '';
+      document.getElementById('create-url').value = '';
+      document.getElementById('create-modal').classList.remove('hidden');
+      document.getElementById('create-modal').classList.add('flex');
+    }
+    function closeCreateModal() {
+      document.getElementById('create-modal').classList.add('hidden');
+      document.getElementById('create-modal').classList.remove('flex');
+    }
+
+    function createSingleQR() {
+      const title = document.getElementById('create-title').value.trim() || "Tarjeta NFC";
+      const ownerEmail = document.getElementById('create-owner').value.trim().toLowerCase();
+      const url = document.getElementById('create-url').value.trim();
+
+      if (url && !/^https?:\/\/.+/i.test(url)) {
+        return showToast("La URL debe empezar con http:// o https://");
+      }
+
+      const sn = `SN-${Math.floor(100000 + Math.random() * 900000)}`;
+
+      db.collection("qrs").doc(sn).set({
+        sn,
+        title,
+        url,
+        ownerEmail,
+        clicks: 0,
+        active: true,
+        created: formatToday()
+      }).then(() => {
+        showToast(`Código ${sn} creado con éxito`);
+        closeCreateModal();
+      }).catch(err => showToast("Error: " + err.message));
+    }
+
+    // ===== CREACIÓN EN LOTE (ADMIN) =====
+    function openBulkModal() {
+      document.getElementById('bulk-progress').classList.add('hidden');
+      document.getElementById('bulk-go').disabled = false;
+      document.getElementById('bulk-modal').classList.remove('hidden');
+      document.getElementById('bulk-modal').classList.add('flex');
+    }
+    function closeBulkModal() {
+      document.getElementById('bulk-modal').classList.add('hidden');
+      document.getElementById('bulk-modal').classList.remove('flex');
+    }
+
+    async function bulkCreateQR() {
+      if (currentUserRole !== 'admin') return;
+      const qty = parseInt(document.getElementById('bulk-qty').value, 10);
+      const baseTitle = document.getElementById('bulk-title').value.trim() || 'Tarjeta NFC';
+      const url = document.getElementById('bulk-url').value.trim();
+
+      if (!qty || qty < 1 || qty > 2000) return showToast("La cantidad debe estar entre 1 y 2000");
+      if (url && !/^https?:\/\/.+/i.test(url)) return showToast("La URL debe empezar con http:// o https://");
+
+      const goBtn = document.getElementById('bulk-go');
+      const cancelBtn = document.getElementById('bulk-cancel');
+      const bar = document.getElementById('bulk-bar');
+      const status = document.getElementById('bulk-status');
+      goBtn.disabled = true; cancelBtn.disabled = true;
+      document.getElementById('bulk-progress').classList.remove('hidden');
+
+      // Series únicas: evita las existentes y las repetidas dentro del lote
+      const used = new Set(qrDatabase.map(q => q.sn));
+      const list = [];
+      while (list.length < qty) {
+        const sn = `SN-${Math.floor(100000 + Math.random() * 900000)}`;
+        if (!used.has(sn)) { used.add(sn); list.push(sn); }
+      }
+
+      const created = formatToday();
+      const pad = String(qty).length;
+      const CHUNK = 500; // límite de Firestore por batch
+      let done = 0;
+
+      try {
+        for (let i = 0; i < list.length; i += CHUNK) {
+          const batch = db.batch();
+          list.slice(i, i + CHUNK).forEach((sn, j) => {
+            batch.set(db.collection("qrs").doc(sn), {
+              sn,
+              title: `${baseTitle} #${String(i + j + 1).padStart(pad, '0')}`,
+              url,
+              ownerEmail: '',
+              clicks: 0,
+              active: true,
+              created
+            });
+          });
+          await batch.commit();
+          done += Math.min(CHUNK, list.length - i);
+          bar.style.width = Math.round(done / qty * 100) + '%';
+          status.innerText = `${done} / ${qty} creados...`;
+        }
+
+        // CSV con serie + enlace (para programar NFC / imprimir)
+        const rows = ['serie,enlace'].concat(list.map(sn => `${sn},${BASE_REDIRECT_URL}${sn}`));
+        const blob = new Blob(['\uFEFF' + rows.join('\n')], { type: 'text/csv;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `lote_qr_${Date.now()}.csv`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+
+        status.innerText = `Listo: ${qty} códigos creados.`;
+        showToast(`${qty} códigos creados. CSV descargado.`);
+        setTimeout(closeBulkModal, 1200);
+      } catch (err) {
+        console.error(err);
+        status.innerText = `Error tras ${done} creados: ${err.message}`;
+        showToast("Error en el lote: " + err.message);
+      } finally {
+        goBtn.disabled = false; cancelBtn.disabled = false;
+      }
+    }
+
+    // Tamaño estándar: QR de 480 px + margen blanco (zona silenciosa) => PNG de 600x600
+    function downloadQR(qrTargetUrl, filename) {
+      const holder = document.createElement('div');
+      new QRCode(holder, {
+        text: qrTargetUrl,
+        width: 480,
+        height: 480,
+        colorDark: "#000000",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.M
+      });
+      setTimeout(() => {
+        const src = holder.querySelector('canvas');
+        if (!src) return;
+        const out = document.createElement('canvas');
+        out.width = 600; out.height = 600;
+        const ctx = out.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, 600, 600);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(src, 60, 60, 480, 480);
+        const a = document.createElement('a');
+        a.href = out.toDataURL('image/png');
+        a.download = `QR_${String(filename).replace(/\s+/g, '_')}.png`;
+        a.click();
+        showToast("QR descargado (600x600 px)");
+      }, 100);
+    }
+
+    function printQR(qrTargetUrl, snLabel) {
+      const win = window.open('', '_blank');
+      win.document.write(`
+        <html>
+          <body style="font-family:sans-serif;text-align:center;padding-top:50px;">
+            <div id="q" style="display:inline-block;padding:24px;background:#fff;"></div>
+            <p style="font-weight:bold;margin-top:12px;font-size:16px;">${snLabel}</p>
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>
+            <script>
+              new QRCode(document.getElementById('q'), {text: "${qrTargetUrl}", width: 256, height: 256, colorDark: "#000000", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.M});
+              setTimeout(() => window.print(), 500);
+            <\/script>
+          </body>
+        </html>
+      `);
+      win.document.close();
+    }
+  </script>
+</body>
+</html>
