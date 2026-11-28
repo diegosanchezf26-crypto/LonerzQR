@@ -12,6 +12,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
@@ -145,6 +147,20 @@
               <i class="fa-solid fa-layer-group"></i> Lote
             </button>
           </div>
+        </div>
+
+        <!-- SELECCIÓN PARA PEDIDOS (SOLO ADMIN) -->
+        <div class="admin-only flex flex-wrap items-center gap-2 bg-white/60 rounded-2xl p-3 text-xs font-bold">
+          <select id="sale-filter" onchange="renderLimit=60;renderCards()" class="bg-white border border-slate-200 rounded-xl px-3 py-2">
+            <option value="all">Todos</option>
+            <option value="free">Disponibles para vender</option>
+            <option value="sold">Vendidos</option>
+          </select>
+          <button onclick="selectFiltered()" class="bg-slate-900 text-white px-3 py-2 rounded-xl">Seleccionar todos los filtrados</button>
+          <span class="flex items-center gap-1.5 sm:ml-auto">
+            <input type="number" id="pick-qty" min="1" value="50" aria-label="Cantidad" class="w-20 bg-white border border-slate-200 rounded-xl px-3 py-2">
+            <button onclick="selectFirstFree()" class="bg-sky-600 text-white px-3 py-2 rounded-xl">Seleccionar disponibles</button>
+          </span>
         </div>
 
         <div id="cards-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5"></div>
@@ -292,6 +308,43 @@
     </div>
   </div>
 
+  <!-- BARRA DE SELECCIÓN -->
+  <div id="selection-bar" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 bg-slate-900 text-white rounded-2xl shadow-2xl px-4 py-3 items-center gap-3 text-xs font-bold z-40 whitespace-nowrap">
+    <span id="selection-count"></span>
+    <button onclick="openOrderModal()" class="bg-emerald-500 hover:bg-emerald-600 px-4 py-2 rounded-xl"><i class="fa-solid fa-file-zipper mr-1"></i> Descargar ZIP</button>
+    <button onclick="clearSelection()" class="text-slate-300 hover:text-white">Limpiar</button>
+  </div>
+
+  <!-- MODAL PEDIDO (ADMIN) -->
+  <div id="order-modal" class="fixed inset-0 bg-slate-950/60 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 max-h-full overflow-y-auto">
+      <h3 class="text-lg font-bold text-slate-900">Paquete para el cliente</h3>
+      <p id="order-summary" class="text-xs text-slate-600"></p>
+      <div id="order-warning" class="hidden text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3"></div>
+      <div>
+        <label class="block text-xs font-bold text-slate-600 mb-1">Nombre del cliente</label>
+        <input type="text" id="order-client" maxlength="60" placeholder="Ej. Juan Pérez" class="w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-bold text-slate-600 mb-1">Tamaño del QR en el PDF (cm)</label>
+          <input type="number" id="order-size" value="2.5" min="1.5" max="8" step="0.1" class="w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-600 mb-1">Precio total S/ (opcional)</label>
+          <input type="number" id="order-price" min="0" step="0.01" class="w-full bg-slate-50 border rounded-xl px-3 py-2.5 text-xs">
+        </div>
+      </div>
+      <label class="flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" id="order-record" checked> Registrar la venta y marcar como "Vendido"</label>
+      <p class="text-[11px] text-slate-500 break-all">Los QR apuntarán a: <span id="order-base" class="font-mono"></span></p>
+      <p id="order-status" class="text-[11px] text-slate-500"></p>
+      <div class="flex justify-end gap-2">
+        <button id="order-cancel" onclick="closeOrderModal()" class="bg-slate-100 text-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl">Cancelar</button>
+        <button id="order-go" onclick="buildOrder()" class="bg-emerald-600 text-white text-xs font-bold px-4 py-2.5 rounded-xl">Descargar ZIP</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="fixed bottom-5 right-5 bg-slate-900 text-white text-xs font-semibold px-4 py-3 rounded-2xl shadow-2xl transform translate-y-20 opacity-0 transition-all z-50">
     <span id="toast-msg">Operación completada</span>
   </div>
@@ -326,6 +379,10 @@
     let unsubscribeDb = null;
     let html5QrCode = null;
     let renderLimit = 60; // con miles de QR solo se dibujan por tandas
+    const selectedSns = new Set();
+    let salesBySn = {};
+    let salesLoaded = false;
+    let unsubscribeSales = null;
 
     function showToast(msg) {
       const toast = document.getElementById('toast');
@@ -363,6 +420,8 @@
         }
       } else {
         if (unsubscribeDb) { unsubscribeDb(); unsubscribeDb = null; }
+        if (unsubscribeSales) { unsubscribeSales(); unsubscribeSales = null; }
+        selectedSns.clear(); updateSelectionBar();
         document.getElementById('login-view').classList.remove('hidden');
         document.getElementById('app-dashboard').classList.add('hidden');
       }
@@ -393,6 +452,16 @@
 
     function initDatabase() {
       if (unsubscribeDb) unsubscribeDb();
+      if (unsubscribeSales) { unsubscribeSales(); unsubscribeSales = null; }
+      salesBySn = {}; salesLoaded = false; selectedSns.clear();
+      if (currentUserRole === 'admin') {
+        unsubscribeSales = db.collection("sales").onSnapshot((snap) => {
+          salesBySn = {};
+          snap.forEach(doc => { salesBySn[doc.id] = doc.data(); });
+          salesLoaded = true;
+          renderCards();
+        }, (err) => showToast("No se pudieron leer las ventas: " + err.message));
+      }
       const query = currentUserRole === 'admin'
         ? db.collection("qrs")
         : db.collection("qrs").where("ownerEmail", "==", loggedUserEmail);
@@ -417,17 +486,65 @@
       });
     }
 
+    function isAvailable(q) {
+      return !q.ownerEmail && !salesBySn[q.sn] && q.active !== false;
+    }
+
+    function getFiltered(search) {
+      const mode = currentUserRole === 'admin' ? document.getElementById('sale-filter').value : 'all';
+      return qrDatabase.filter(q => {
+        if (mode === 'free' && !(salesLoaded && isAvailable(q))) return false;
+        if (mode === 'sold' && !salesBySn[q.sn]) return false;
+        return [q.sn, q.title, q.url, q.ownerEmail, salesBySn[q.sn]?.client || '']
+          .some(v => String(v).toLowerCase().includes(search));
+      });
+    }
+
+    function updateSelectionBar() {
+      const bar = document.getElementById('selection-bar');
+      const show = currentUserRole === 'admin' && selectedSns.size > 0;
+      bar.classList.toggle('hidden', !show);
+      bar.classList.toggle('flex', show);
+      document.getElementById('selection-count').innerText = `${selectedSns.size} seleccionado${selectedSns.size === 1 ? '' : 's'}`;
+      document.getElementById('cards-grid').style.paddingBottom = show ? '80px' : '';
+    }
+
+    function toggleSelect(sn, checked) {
+      checked ? selectedSns.add(sn) : selectedSns.delete(sn);
+      updateSelectionBar();
+    }
+
+    function selectFiltered() {
+      const list = getFiltered(document.getElementById('global-search').value.toLowerCase());
+      list.forEach(q => selectedSns.add(q.sn));
+      renderCards();
+      showToast(`${list.length} tarjetas filtradas seleccionadas`);
+    }
+
+    function selectFirstFree() {
+      if (!salesLoaded) return showToast("Aún no se cargan las ventas. Intenta en unos segundos.");
+      const qty = parseInt(document.getElementById('pick-qty').value, 10);
+      if (!qty || qty < 1) return showToast("Escribe una cantidad válida");
+      const free = qrDatabase.filter(isAvailable)
+        .sort((a, b) => a.title.localeCompare(b.title, 'es', { numeric: true }) || a.sn.localeCompare(b.sn));
+      selectedSns.clear();
+      free.slice(0, qty).forEach(q => selectedSns.add(q.sn));
+      renderCards();
+      showToast(free.length < qty ? `Solo hay ${free.length} disponibles; se seleccionaron todos` : `${qty} disponibles seleccionados`);
+    }
+
+    function clearSelection() {
+      selectedSns.clear();
+      renderCards();
+    }
+
     function renderCards() {
       const search = (document.getElementById('global-search')?.value || '').toLowerCase();
       const grid = document.getElementById('cards-grid');
       grid.innerHTML = '';
 
-      const filtered = qrDatabase.filter(q =>
-        q.sn.toLowerCase().includes(search) ||
-        q.title.toLowerCase().includes(search) ||
-        q.url.toLowerCase().includes(search) ||
-        q.ownerEmail.toLowerCase().includes(search)
-      );
+      const filtered = getFiltered(search);
+      updateSelectionBar();
 
       if (filtered.length === 0) {
         grid.innerHTML = `<div class="col-span-full p-12 text-center text-slate-700 bg-white/60 rounded-2xl font-medium">No hay tarjetas registradas aquí. Escanea un QR libre o vincúlalo con su número de serie.</div>`;
@@ -447,7 +564,18 @@
              </p>`
           : '';
 
+        const sale = salesBySn[item.sn];
+        const selectRow = currentUserRole === 'admin'
+          ? `<div class="flex items-center justify-between gap-2 -mb-2">
+               <label class="flex items-center gap-2 text-[11px] font-bold text-slate-600 cursor-pointer">
+                 <input type="checkbox" class="w-4 h-4 accent-emerald-600" ${selectedSns.has(item.sn) ? 'checked' : ''} onchange="toggleSelect('${item.sn}', this.checked)"> Seleccionar
+               </label>
+               ${sale ? `<span class="truncate bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full">Vendido: ${esc(sale.client)}</span>` : ''}
+             </div>`
+          : '';
+
         card.innerHTML = `
+          ${selectRow}
           <div class="flex gap-4 items-start">
             <div class="relative group cursor-pointer" onclick="openPreviewModal('${item.sn}')">
               <div id="${cardId}" class="w-20 h-20 bg-white p-1 rounded-xl border border-slate-200 flex-shrink-0 flex items-center justify-center"></div>
@@ -771,7 +899,7 @@
       document.getElementById('create-modal').classList.remove('flex');
     }
 
-    function createSingleQR() {
+    async function createSingleQR() {
       const title = document.getElementById('create-title').value.trim() || "Tarjeta NFC";
       const ownerEmail = document.getElementById('create-owner').value.trim().toLowerCase();
       const url = document.getElementById('create-url').value.trim();
@@ -780,7 +908,13 @@
         return showToast("La URL debe empezar con http:// o https://");
       }
 
-      const sn = `SN-${Math.floor(100000 + Math.random() * 900000)}`;
+      let sn;
+      try {
+        do { sn = `SN-${Math.floor(100000 + Math.random() * 900000)}`; }
+        while ((await db.collection("qrs").doc(sn).get()).exists);
+      } catch (err) {
+        return showToast("Error: " + err.message);
+      }
 
       db.collection("qrs").doc(sn).set({
         sn,
@@ -875,6 +1009,269 @@
         showToast("Error en el lote: " + err.message);
       } finally {
         goBtn.disabled = false; cancelBtn.disabled = false;
+      }
+    }
+
+    // ===== PAQUETE ZIP PARA EL CLIENTE (ADMIN) =====
+    let orderBusy = false;
+
+    function openOrderModal() {
+      if (currentUserRole !== 'admin' || !selectedSns.size) return;
+      const sns = [...selectedSns];
+      const sold = sns.filter(sn => salesBySn[sn]);
+      const owned = qrDatabase.filter(q => selectedSns.has(q.sn) && q.ownerEmail).length;
+      const clients = [...new Set(sold.map(sn => salesBySn[sn].client))];
+      const samePrevious = sold.length === sns.length && clients.length === 1;
+
+      const warnings = [];
+      if (sold.length && !samePrevious) warnings.push(`${sold.length} ya figuran como vendidos (${clients.join(', ')}).`);
+      if (samePrevious) warnings.push(`Este pedido ya está registrado a nombre de ${clients[0]}.`);
+      if (owned) warnings.push(`${owned} ya tienen propietario vinculado.`);
+      if (/^(file:|null)|localhost|127\.0\.0\.1/.test(BASE_REDIRECT_URL)) warnings.push('El enlace apunta a tu computadora: NO imprimas estos QR.');
+      const box = document.getElementById('order-warning');
+      box.innerText = warnings.join(' ');
+      box.classList.toggle('hidden', !warnings.length);
+
+      document.getElementById('order-summary').innerText = `${sns.length} códigos QR seleccionados.`;
+      document.getElementById('order-client').value = samePrevious ? clients[0] : '';
+      document.getElementById('order-price').value = '';
+      document.getElementById('order-record').checked = !samePrevious;
+      document.getElementById('order-base').innerText = BASE_REDIRECT_URL;
+      document.getElementById('order-status').innerText = '';
+      document.getElementById('order-modal').classList.remove('hidden');
+      document.getElementById('order-modal').classList.add('flex');
+    }
+
+    function closeOrderModal() {
+      if (orderBusy) return;
+      document.getElementById('order-modal').classList.add('hidden');
+      document.getElementById('order-modal').classList.remove('flex');
+    }
+
+    // Matriz de módulos del QR (true = negro)
+    function qrMatrix(text) {
+      const qr = new QRCode(document.createElement('div'), { text, width: 64, height: 64, correctLevel: QRCode.CorrectLevel.M });
+      const model = qr._oQRCode;
+      const n = model.getModuleCount();
+      return Array.from({ length: n }, (_, r) => Array.from({ length: n }, (_, c) => model.isDark(r, c)));
+    }
+
+    // Recorre las franjas horizontales de módulos negros
+    function eachRun(m, fn) {
+      m.forEach((row, r) => {
+        for (let c = 0; c < row.length; c++) {
+          if (!row[c]) continue;
+          const start = c;
+          while (row[c + 1]) c++;
+          fn(start, r, c - start + 1);
+        }
+      });
+    }
+
+    const QUIET = 4; // margen blanco obligatorio, en módulos
+
+    function qrSvg(m, label) {
+      const size = m.length + QUIET * 2;
+      const height = size + (label ? 4 : 0);
+      let d = '';
+      eachRun(m, (x, y, w) => { d += `M${x + QUIET} ${y + QUIET}h${w}v1h-${w}z`; });
+      const text = label ? `<text x="${size / 2}" y="${size + 1.5}" font-family="Arial, Helvetica, sans-serif" font-size="3.5" font-weight="bold" text-anchor="middle">${esc(label)}</text>` : '';
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${height}" width="${size * 24}" height="${height * 24}" shape-rendering="crispEdges"><rect width="${size}" height="${height}" fill="#fff"/><path d="${d}" fill="#000"/>${text}</svg>`;
+    }
+
+    function qrPng(m, label) {
+      const px = 24; // píxeles por módulo (imagen de ~1000 px)
+      const size = (m.length + QUIET * 2) * px;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size + (label ? 4 * px : 0);
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#000';
+      eachRun(m, (x, y, w) => ctx.fillRect((x + QUIET) * px, (y + QUIET) * px, w * px, px));
+      if (label) {
+        ctx.font = `bold ${3.5 * px}px Arial, Helvetica, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText(label, size / 2, size + 1.5 * px);
+      }
+      return new Promise((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error('No se pudo crear la imagen')), 'image/png'));
+    }
+
+    // Las fuentes estándar del PDF no admiten emojis ni alfabetos no latinos
+    const pdfSafe = t => String(t).replace(/[^\x20-\x7E\xA0-\xFF]/g, '');
+
+    async function catalogPdf(items, client, sizeCm) {
+      const { PDFDocument, StandardFonts, rgb } = PDFLib;
+      const doc = await PDFDocument.create();
+      const font = await doc.embedFont(StandardFonts.Helvetica);
+      const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+      const W = 595.28, H = 841.89, M = 28, HEAD = 30;
+      const side = sizeCm * 72 / 2.54;            // lado de la parte negra del QR
+      const quiet = side * QUIET / 29;            // margen blanco (29 módulos o más)
+      const cellW = Math.max(side + quiet * 2, 85);
+      const cellH = side + quiet * 2 + 22;
+      const cols = Math.floor((W - M * 2) / cellW);
+      const rows = Math.floor((H - M * 2 - HEAD) / cellH);
+      const perPage = cols * rows;
+      const pages = Math.ceil(items.length / perPage);
+      const x0 = (W - cols * cellW) / 2;
+      let page;
+
+      const center = (text, f, size, cx, y, maxW) => {
+        let s = size;
+        while (f.widthOfTextAtSize(text, s) > maxW && s > 3) s -= 0.2;
+        page.drawText(text, { x: cx - f.widthOfTextAtSize(text, s) / 2, y, size: s, font: f });
+      };
+
+      for (let i = 0; i < items.length; i++) {
+        const k = i % perPage;
+        if (k === 0) {
+          page = doc.addPage([W, H]);
+          page.drawText(pdfSafe(`QRLonberz  |  ${client}  |  ${items.length} códigos`), { x: x0, y: H - M - 10, size: 11, font: bold });
+          page.drawText(`Página ${i / perPage + 1} de ${pages}  |  Imprimir al 100% (sin ajustar a la página)`, { x: x0, y: H - M - 22, size: 8, font });
+        }
+        const x = x0 + (k % cols) * cellW;
+        const top = H - M - HEAD - Math.floor(k / cols) * cellH;
+        page.drawRectangle({ x, y: top - cellH, width: cellW, height: cellH, borderColor: rgb(0.75, 0.75, 0.75), borderWidth: 0.4 });
+
+        const { sn, link, matrix } = items[i];
+        const mod = side / matrix.length;
+        const qx = x + (cellW - side) / 2;
+        const qTop = top - quiet;
+        eachRun(matrix, (cx, cy, w) => page.drawRectangle({ x: qx + cx * mod, y: qTop - (cy + 1) * mod, width: w * mod, height: mod, color: rgb(0, 0, 0) }));
+        center(sn, bold, 9, x + cellW / 2, top - cellH + 14, cellW - 6);
+        center(link, font, 5, x + cellW / 2, top - cellH + 5, cellW - 6);
+        if (i % 20 === 19) await new Promise(r => setTimeout(r));
+      }
+      return doc.save();
+    }
+
+    async function instructionsPdf(client, count) {
+      const { PDFDocument, StandardFonts } = PDFLib;
+      const doc = await PDFDocument.create();
+      const font = await doc.embedFont(StandardFonts.Helvetica);
+      const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+      const page = doc.addPage([595.28, 841.89]);
+      let y = 790;
+      const line = (text, f = font, size = 10.5) => {
+        page.drawText(pdfSafe(text), { x: 50, y, size, font: f });
+        y -= size + 6;
+      };
+      const title = t => { y -= 10; line(t, bold, 13); };
+
+      line('QRLonberz - Instrucciones', bold, 18);
+      line(`Pedido de ${client}: ${count} códigos QR dinámicos`);
+
+      title('Qué contiene este paquete');
+      line('catalogo.pdf: todos los QR con su número de serie y enlace.');
+      line('qr_solo/: cada QR sin texto (PNG y SVG), para tu diseño.');
+      line('qr_con_serie/: cada QR con el número de serie debajo (PNG y SVG).');
+      line('lista.csv: serie y enlace de cada código (se abre con Excel).');
+
+      title('Imprimir');
+      line('Usa el archivo SVG para imprenta: no pierde calidad al cambiar de tamaño.');
+      line('No recortes el margen blanco que rodea al QR ni deformes la imagen.');
+      line('Tamaño recomendado: 2 cm o más. Prueba una tarjeta antes de imprimir todas.');
+
+      title('Grabar el chip NFC');
+      line('1. Instala una app para grabar NFC, por ejemplo NFC Tools.');
+      line('2. Elige escribir un registro de tipo URL o enlace.');
+      line('3. Copia desde lista.csv el enlace de la MISMA serie impresa en la tarjeta.');
+      line('4. Graba el chip y comprueba que abra ese enlace.');
+
+      title('Activar una tarjeta (usuario final)');
+      line('Escanea el QR e inicia sesión con Google para vincularla a tu cuenta.');
+      line('Si el código ya redirige a una página, entra al panel, pulsa "Vincular"');
+      line('y escribe el número de serie. Luego pulsa "Editar" para poner tu enlace.');
+
+      title('Importante');
+      line('Una tarjeta queda para quien la vincule primero. Al probarla antes de');
+      line('entregarla, NO inicies sesión ni la vincules.');
+      return doc.save();
+    }
+
+    async function buildOrder() {
+      if (currentUserRole !== 'admin' || orderBusy) return;
+      const client = document.getElementById('order-client').value.trim();
+      const sizeCm = parseFloat(document.getElementById('order-size').value);
+      const price = parseFloat(document.getElementById('order-price').value);
+      const record = document.getElementById('order-record').checked;
+      const status = document.getElementById('order-status');
+
+      if (!client) return showToast("Escribe el nombre del cliente");
+      if (!(sizeCm >= 1.5 && sizeCm <= 8)) return showToast("El tamaño debe estar entre 1.5 y 8 cm");
+      if (!window.JSZip || !window.PDFLib) return showToast("No cargaron las librerías. Revisa tu conexión y recarga.");
+      if (record && !salesLoaded) return showToast("Aún no se cargan las ventas. Intenta en unos segundos.");
+
+      const chosen = qrDatabase.filter(q => selectedSns.has(q.sn))
+        .sort((a, b) => a.sn.localeCompare(b.sn));
+      if (!chosen.length) return showToast("No hay códigos seleccionados");
+      if (record && chosen.some(q => salesBySn[q.sn] && salesBySn[q.sn].client !== client) &&
+          !confirm("Algunos códigos ya fueron vendidos a otro cliente. ¿Registrarlos igualmente a este nombre?")) return;
+
+      const goBtn = document.getElementById('order-go');
+      const cancelBtn = document.getElementById('order-cancel');
+      orderBusy = true; goBtn.disabled = true; cancelBtn.disabled = true;
+
+      try {
+        const zip = new JSZip();
+        const items = [];
+        for (let i = 0; i < chosen.length; i++) {
+          const sn = chosen[i].sn;
+          const link = BASE_REDIRECT_URL + sn;
+          const matrix = qrMatrix(link);
+          items.push({ sn, link, matrix });
+          zip.file(`qr_solo/${sn}.svg`, qrSvg(matrix, ''));
+          zip.file(`qr_solo/${sn}.png`, await qrPng(matrix, ''));
+          zip.file(`qr_con_serie/${sn}.svg`, qrSvg(matrix, sn));
+          zip.file(`qr_con_serie/${sn}.png`, await qrPng(matrix, sn));
+          status.innerText = `Creando imágenes: ${i + 1} / ${chosen.length}`;
+        }
+
+        status.innerText = 'Armando los PDF...';
+        zip.file('catalogo.pdf', await catalogPdf(items, client, sizeCm));
+        zip.file('instrucciones.pdf', await instructionsPdf(client, items.length));
+        zip.file('lista.csv', '﻿' + ['serie,enlace', ...items.map(q => `${q.sn},${q.link}`)].join('\r\n'));
+
+        status.innerText = 'Comprimiendo...';
+        const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+        const safeName = client.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'Cliente';
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `Pedido_${safeName}_${items.length}QR.zip`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+
+        if (record) {
+          status.innerText = 'Registrando la venta...';
+          const orderId = `P${Date.now()}`;
+          try {
+            for (let i = 0; i < items.length; i += 500) {
+              const batch = db.batch();
+              items.slice(i, i + 500).forEach(({ sn }) => {
+                const data = { sn, client, orderId, orderQty: items.length, soldAt: firebase.firestore.FieldValue.serverTimestamp() };
+                if (price >= 0) data.orderPrice = price;
+                batch.set(db.collection('sales').doc(sn), data, { merge: true });
+              });
+              await batch.commit();
+            }
+          } catch (err) {
+            console.error(err);
+            status.innerText = `El ZIP se descargó, pero la venta NO se registró completa: ${err.message}`;
+            return;
+          }
+        }
+
+        orderBusy = false;
+        closeOrderModal();
+        clearSelection();
+        showToast(`ZIP descargado con ${items.length} códigos`);
+      } catch (err) {
+        console.error(err);
+        status.innerText = "Error al crear el paquete: " + err.message;
+      } finally {
+        orderBusy = false; goBtn.disabled = false; cancelBtn.disabled = false;
       }
     }
 
